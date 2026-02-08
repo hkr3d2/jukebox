@@ -1,0 +1,83 @@
+name: Build Jukebox
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows
+            os: windows-latest
+            build-type: RelWithDebInfo
+          - name: macOS
+            os: macos-latest
+          - name: iOS
+            os: macos-latest
+            target: iOS
+          - name: Android32
+            os: ubuntu-22.04
+            target: Android32
+          - name: Android64
+            os: ubuntu-22.04
+            target: Android64
+
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive  # Important if you use submodules
+
+      - name: Update LLVM Windows
+        run: choco upgrade llvm
+        if: matrix.config.os == 'windows-latest'
+
+      # ADD THIS STEP - Setup Geode SDK
+      - name: Setup Geode SDK
+        run: |
+          # Install Geode SDK binaries
+          # On Windows
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            choco install geode-sdk
+            geode sdk install-binaries
+          # On macOS/Linux
+          else
+            # You might need to adjust this based on your actual setup
+            curl -L -o geode-sdk.tar.gz https://github.com/geode-sdk/Geode/releases/latest/download/Geode-SDK.tar.gz
+            tar -xzf geode-sdk.tar.gz
+            # Add to PATH or set environment variables as needed
+            echo "$PWD/Geode-SDK/bin" >> $GITHUB_PATH
+            geode sdk install-binaries
+          fi
+
+      - name: Build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          export-pdb: true
+          combine: true
+          target: ${{ matrix.config.target }}
+          ccache-variant: ccache
+          build-config: ${{ matrix.config.build-type || 'Release' }}
+
+  package:
+    name: Package builds
+    runs-on: ubuntu-latest
+    needs: [ build ]
+
+    steps:
+      - name: Combine builds
+        uses: geode-sdk/build-geode-mod/combine@main
+        id: build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build Output
+          path: ${{ steps.build.outputs.build-output }}
